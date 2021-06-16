@@ -1,0 +1,3 @@
+load sample/hello64
+start
+disasm 0x4000b0
