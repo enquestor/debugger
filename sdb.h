@@ -9,6 +9,12 @@ using namespace std;
 
 typedef long long ll;
 const int MAX = 0x100;
+vector<string> REGS = {
+    "rax", "rbx", "rcx", "rdx",
+    "r8" , "r9" , "r10", "r11", 
+    "r12", "r13", "r14", "r15",
+    "rdi", "rsi", "rbp", "rsp", 
+    "rip", "flags"};
 
 enum state {
 	ANY,

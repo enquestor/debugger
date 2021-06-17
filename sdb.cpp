@@ -30,11 +30,8 @@ char *code = NULL;
 int bi = 0;
 int dislen = 10;
 int hitbp = -1;
-struct user_regs_struct regs_struct = {0};
-map<string, ll*> regs;
-vector<string> reglist = {"rax", "rbx", "rcx", "rdx",
-    "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15",
-    "rdi", "rsi", "rbp", "rsp", "rip", "flags"};
+struct user_regs_struct regs = {0};
+
 vector<breakpoint> bpoints;
 
 string exec(const char* cmd) {
@@ -48,6 +45,28 @@ string exec(const char* cmd) {
         result += buffer.data();
     }
     return result;
+}
+
+ll* reg(string name) {
+    if (name == "rax"  ) return (ll*) &regs.rax;
+    if (name == "rbx"  ) return (ll*) &regs.rbx;
+    if (name == "rcx"  ) return (ll*) &regs.rcx;
+    if (name == "rdx"  ) return (ll*) &regs.rdx;
+    if (name == "rsp"  ) return (ll*) &regs.rsp;
+    if (name == "rbp"  ) return (ll*) &regs.rbp;
+    if (name == "rsi"  ) return (ll*) &regs.rsi;
+    if (name == "rdi"  ) return (ll*) &regs.rdi;
+    if (name == "rip"  ) return (ll*) &regs.rip;
+    if (name == "r8"   ) return (ll*) &regs.r8;
+    if (name == "r9"   ) return (ll*) &regs.r9;
+    if (name == "r10"  ) return (ll*) &regs.r10;
+    if (name == "r11"  ) return (ll*) &regs.r11;
+    if (name == "r12"  ) return (ll*) &regs.r12;
+    if (name == "r13"  ) return (ll*) &regs.r13;
+    if (name == "r14"  ) return (ll*) &regs.r14;
+    if (name == "r15"  ) return (ll*) &regs.r15;
+    if (name == "flags") return (ll*) &regs.eflags;
+    return NULL;
 }
 
 void pt_code() {
@@ -72,31 +91,13 @@ string pt_mem(const ll addr) {
 }
 
 void pt_regs() {
-    ptrace(PTRACE_GETREGS, pid, NULL, &regs_struct);
-    regs["rax"] = (ll*) &regs_struct.rax;
-    regs["rbx"] = (ll*) &regs_struct.rbx;
-    regs["rcx"] = (ll*) &regs_struct.rcx;
-    regs["rdx"] = (ll*) &regs_struct.rdx;
-    regs["rsp"] = (ll*) &regs_struct.rsp;
-    regs["rbp"] = (ll*) &regs_struct.rbp;
-    regs["rsi"] = (ll*) &regs_struct.rsi;
-    regs["rdi"] = (ll*) &regs_struct.rdi;
-    regs["rip"] = (ll*) &regs_struct.rip;
-    regs["r8"] = (ll*) &regs_struct.r8;
-    regs["r9"] = (ll*) &regs_struct.r9;
-    regs["r10"] = (ll*) &regs_struct.r10;
-    regs["r11"] = (ll*) &regs_struct.r11;
-    regs["r12"] = (ll*) &regs_struct.r12;
-    regs["r13"] = (ll*) &regs_struct.r13;
-    regs["r14"] = (ll*) &regs_struct.r14;
-    regs["r15"] = (ll*) &regs_struct.r15;
-    regs["flags"] = (ll*) &regs_struct.eflags;
+    ptrace(PTRACE_GETREGS, pid, NULL, &regs);
 }
 
 void print_reg(const string &name) {
-    for (auto &x : reglist) {
+    for (auto &x : REGS) {
         if (x == name) {
-            ll val = *regs[name];
+            ll val = *reg(name);
             cerr << name << " = " << val
                 << " (" << hex << "0x" << val << dec << ")" << endl;
             return;
@@ -160,7 +161,7 @@ int chkst() {
         pt_regs();
         for (auto &x : bpoints) {
             ll tmpaddr = x.addr;
-            if (tmpaddr == (*regs["rip"]) - 1) {
+            if (tmpaddr == (*reg("rip") - 1)) {
                 hitbp = x.id;
                 bpaddr = tmpaddr;
 				
@@ -173,8 +174,8 @@ int chkst() {
                 dislen = 10;
 
                 patch_byte(tmpaddr, x.ori);
-                (*regs["rip"])--;
-                ptrace(PTRACE_SETREGS, pid, NULL, &regs_struct);
+                (*reg("rip"))--;
+                ptrace(PTRACE_SETREGS, pid, NULL, &regs);
                 return 1;
             }
         }
@@ -375,19 +376,19 @@ void getregs() {
         return;
     }
     pt_regs();
-    for (auto &x : reglist) {
+    for (auto &x : REGS) {
         print_reg(x);
     }
 }
 
-void set(const string &reg, ll val) {
+void set(const string &name, ll val) {
     if (st != RUNNING) {
         cerr << "** state must be RUNNING." << endl;
         return;
     }
     pt_regs();
-    *regs[reg] = val;
-    ptrace(PTRACE_SETREGS, pid, NULL, &regs_struct);
+    *reg(name) = val;
+    ptrace(PTRACE_SETREGS, pid, NULL, &regs);
 }
 
 void list() {
