@@ -16,16 +16,18 @@
 #include "sdb.h"
 using namespace std;
 
-int state = NOLOAD;
+state st = ANY;
 program prog;
 string flags;
+
 pid_t pid = 0;
+
 ll disaddr = -1;
 ll dumpaddr = -1;
 ll bpaddr = -1;
 ll textbase = 0;
 char *code = NULL;
-int bpid = 0;
+int bi = 0;
 int dislen = 10;
 int hitbp = -1;
 struct user_regs_struct regs_struct = {0};
@@ -48,7 +50,7 @@ string exec(const char* cmd) {
     return result;
 }
 
-void get_code() {
+void pt_code() {
     ifstream f(prog.path.c_str(), ios::in | ios::binary | ios::ate);
     streampos size;
     size = f.tellg();
@@ -60,16 +62,16 @@ void get_code() {
     f.close();
 }
 
-string get_mem(const ll addr) {
+string pt_mem(const ll addr) {
     string s = "";
-    for (int i = 0; i < MAXASM / 8; i++) {
+    for (int i = 0; i < MAX / 8; i++) {
         auto out = ptrace(PTRACE_PEEKTEXT, pid, addr, NULL);
         s += string((char*) &out, 8);
     }
     return s;
 }
 
-void get_regs() {
+void pt_regs() {
     ptrace(PTRACE_GETREGS, pid, NULL, &regs_struct);
     regs["rax"] = (ll*) &regs_struct.rax;
     regs["rbx"] = (ll*) &regs_struct.rbx;
@@ -112,7 +114,7 @@ string disone(unsigned char *pos, ll &addr) {
         cerr << "** cs open error." << endl;
         return "";
     }
-    count = cs_disasm(handle, pos, MAXASM, addr, 0, &insn);
+    count = cs_disasm(handle, pos, MAX, addr, 0, &insn);
     if (count > 0) {
         stringstream ss;
         ss << hex << setfill(' ') << setw(12) << insn[0].address << ": "
@@ -146,9 +148,6 @@ bool chkat(const auto &x, unsigned int at, bool p) {
     return false;
 }
 
-// don't care:              -1
-// hit breakpoint before:   0
-// hit breakpoint now:      1
 int chkst() {
     int status;
     waitpid(pid, &status, 0);
@@ -158,14 +157,13 @@ int chkst() {
             return -1;
         }
         if (hitbp != -1) return 0;
-        get_regs();
-        // hit the breakpoint or not
+        pt_regs();
         for (auto &x : bpoints) {
             ll tmpaddr = x.addr;
             if (tmpaddr == (*regs["rip"]) - 1) {
                 hitbp = x.id;
                 bpaddr = tmpaddr;
-                // show breakpoint message
+				
                 dislen = 1;
                 ll addrbak = disaddr;
                 cerr << "** breakpoint @ ";
@@ -173,7 +171,7 @@ int chkst() {
                 disasm();
                 disaddr = addrbak;
                 dislen = 10;
-                // restore the original value
+
                 patch_byte(tmpaddr, x.ori);
                 (*regs["rip"])--;
                 ptrace(PTRACE_SETREGS, pid, NULL, &regs_struct);
@@ -188,7 +186,7 @@ int chkst() {
         else
             cerr << "** child process " << pid << " terminiated normally (code " << status << ")" << endl;
         pid = 0;
-        state = LOADED;
+        st = LOADED;
         return -1;
     }
     return -1;
@@ -222,7 +220,7 @@ void quit() {
 }
 
 void load() {
-	if (state != NOLOAD) {
+	if (st != ANY) {
         cerr << "** state must be NOT LOADED." << endl;
         return;
     }
@@ -239,18 +237,18 @@ void load() {
 		<< ", vaddr 0x" << prog.addr
 		<< ", offset 0x" << prog.offset
 		<< ", size 0x" << prog.size << endl << dec;
-	state = LOADED;
+	st = LOADED;
 }
 
 void vmmap() {
-    if (state == LOADED) {
+    if (st == LOADED) {
         cerr << hex << setfill('0') << setw(16) << prog.addr << "-"
             << setfill('0') << setw(16) << prog.addr + prog.size << " "
             << flags << " "
             << setfill('0') << setw(8) << prog.offset << " "
             << prog.path << endl << dec;
     }
-    else if (state == RUNNING) {
+    else if (st == RUNNING) {
         ifstream f("/proc/" + to_string(pid) + "/maps");
         string s;
         while (getline(f, s)) {
@@ -272,7 +270,7 @@ void vmmap() {
 }
 
 void start() {
-    if (state != LOADED) {
+    if (st != LOADED) {
         cerr << "** state must be LOADED." << endl;
         return;
     }
@@ -297,7 +295,6 @@ void start() {
         waitpid(pid, &status, 0);
         // if parent is terminated, kill child
         ptrace(PTRACE_SETOPTIONS, pid, 0, PTRACE_O_EXITKILL);
-		cout<<"FUCK"<<endl;
         // get text base address
         ifstream f("/proc/" + to_string(pid) + "/stat");
         string s;
@@ -313,12 +310,12 @@ void start() {
             }
         }
         cerr << "** pid " << pid << endl;
-        state = RUNNING;
+        st = RUNNING;
     }
 }
 
 void cont() {
-    if (state != RUNNING) {
+    if (st != RUNNING) {
         cerr << "** state must be RUNNING." << endl;
         return;
     }
@@ -331,11 +328,11 @@ void cont() {
 }
 
 void run() {
-    if (state == RUNNING) {
+    if (st == RUNNING) {
         cerr << "** program '" << prog.path << "' is already running." << endl;
         cont();
     }
-    else if (state == LOADED) {
+    else if (st == LOADED) {
         start();
         cont();
     }
@@ -345,7 +342,7 @@ void run() {
 }
 
 void si() {
-    if (state != RUNNING) {
+    if (st != RUNNING) {
         cerr << "** state must be RUNNING." << endl;
         return;
     }
@@ -364,31 +361,31 @@ void si() {
 }
 
 void get(const string &reg) {
-    if (state != RUNNING) {
+    if (st != RUNNING) {
         cerr << "** state must be RUNNING." << endl;
         return;
     }
-    get_regs();
+    pt_regs();
     print_reg(reg);
 }
 
 void getregs() {
-    if (state != RUNNING) {
+    if (st != RUNNING) {
         cerr << "** state must be RUNNING." << endl;
         return;
     }
-    get_regs();
+    pt_regs();
     for (auto &x : reglist) {
         print_reg(x);
     }
 }
 
 void set(const string &reg, ll val) {
-    if (state != RUNNING) {
+    if (st != RUNNING) {
         cerr << "** state must be RUNNING." << endl;
         return;
     }
-    get_regs();
+    pt_regs();
     *regs[reg] = val;
     ptrace(PTRACE_SETREGS, pid, NULL, &regs_struct);
 }
@@ -402,16 +399,16 @@ void list() {
 }
 
 void bp(const ll addr) {
-    if (state == LOADED) {
+    if (st == LOADED) {
         if (!isintext(addr)) {
             cerr << "** address must be in the text segment. (LOADED state)" << endl;
             return;
         }
-        bpoints.PB({bpid++, addr, 0, false});
+        bpoints.push_back({bi++, addr, 0, false});
     }
-    else if (state == RUNNING) {
+    else if (st == RUNNING) {
         unsigned char tmp = patch_byte(addr, 0xcc);
-        bpoints.PB({bpid++, addr, tmp, true});
+        bpoints.push_back({bi++, addr, tmp, true});
     }
     else {
         cerr << "** state must be LOADED or RUNNING." << endl;
@@ -433,7 +430,7 @@ void del(int id) {
 }
 
 void disasm() {
-    if (state != LOADED && state != RUNNING) {
+    if (st != LOADED && st != RUNNING) {
         cerr << "** state must be LOADED or RUNNING." << endl;
         return;
     }
@@ -441,8 +438,8 @@ void disasm() {
         cerr << "** no addr is given." << endl;
         return;
     }
-    if (code == NULL) get_code();
-    if (state == LOADED) {
+    if (code == NULL) pt_code();
+    if (st == LOADED) {
         for (int i = 0; i < dislen; i++) {
             auto pos = (unsigned char*) code + prog.offset + (disaddr - prog.addr);
             ll tmpaddr = disaddr;
@@ -455,7 +452,7 @@ void disasm() {
         }
         return;
     }
-    if (state == RUNNING) {
+    if (st == RUNNING) {
         for (int i = 0; i < dislen; i++) {
             if (isintext(disaddr)) {
                 ll offset;
@@ -465,7 +462,7 @@ void disasm() {
                 cerr << out;
             }
             else {
-                string s = get_mem(disaddr);
+                string s = pt_mem(disaddr);
                 auto pos = (unsigned char*) s.c_str();
                 string out = disone(pos, disaddr);
                 cerr << out;
@@ -475,7 +472,7 @@ void disasm() {
 }
 
 void dump(int sz) {
-    if (state != RUNNING) {
+    if (st != RUNNING) {
         cerr << "** state must be RUNNING." << endl;
         return;
     }

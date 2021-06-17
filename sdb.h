@@ -1,20 +1,20 @@
 #ifndef __SDB_H__
 #define __SDB_H__
 
-#include <cstdint>
+#include <vector>
 #include <string>
 #include <sstream>
-#include <vector>
-
-#define PB push_back
-#define NOLOAD  0
-#define LOADED  1
-#define RUNNING 2
-#define MAXASM  0x100
 
 using namespace std;
 
 typedef long long ll;
+const int MAX = 0x100;
+
+enum state {
+	ANY,
+	LOADED,
+	RUNNING
+};
 
 struct program {
 	string path;
@@ -33,14 +33,15 @@ struct breakpoint {
         }
 };
 
+
 vector<string> split(const string &s, const char d = '\0') {
     vector<string> res;
     stringstream ss(s);
     string item;
     if (d)
-        while (getline(ss, item, d)) res.PB(item);
+        while (getline(ss, item, d)) res.push_back(item);
     else
-        while (ss >> item) res.PB(item);
+        while (ss >> item) res.push_back(item);
     return res;
 }
 
