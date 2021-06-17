@@ -14,29 +14,27 @@
 
 using namespace std;
 
-typedef vector<string> VS;
-typedef long long LL;
-typedef unsigned char UC;
+typedef long long ll;
 
 struct program {
 	string path;
-	LL addr;
-	LL offset;
-	LL size;
+	ll addr;
+	ll offset;
+	ll size;
 };
 
 struct breakpoint {
     int id;
-    LL addr;
-    UC ori;
+    ll addr;
+    unsigned char ori;
     bool isfix;
-    breakpoint(int _i = -1, LL _a = 0, UC _o = '\0', bool _f = false)
+    breakpoint(int _i = -1, ll _a = 0, unsigned char _o = '\0', bool _f = false)
         : id(_i), addr(_a), ori(_o), isfix(_f) {
         }
 };
 
-VS split(const string &s, const char d = '\0') {
-    VS res;
+vector<string> split(const string &s, const char d = '\0') {
+    vector<string> res;
     stringstream ss(s);
     string item;
     if (d)
@@ -46,7 +44,7 @@ VS split(const string &s, const char d = '\0') {
     return res;
 }
 
-string get_byte(const UC *byte) {
+string get_byte(const unsigned char *byte) {
     stringstream ss;
     ss << hex << setfill('0') << setw(2) << (int) *byte;
     string tmp;
@@ -54,7 +52,7 @@ string get_byte(const UC *byte) {
     return tmp;
 }
 
-string get_bytes(const UC *bytes, int n) {
+string get_bytes(const unsigned char *bytes, int n) {
     string out = "";
     bool fir = true;
     for (int i = 0; i < n; i++) {
@@ -76,7 +74,7 @@ string get_printable(const string &s) {
     return out;
 }
 
-string flags2rwx(const LL flags) {
+string flags2rwx(const ll flags) {
     string per = "xwr", tmp = "";
     for (int i = 2; i >= 0; i--) {
         if (flags & (1 << i)) tmp += per[i];
@@ -85,7 +83,7 @@ string flags2rwx(const LL flags) {
     return tmp;
 }
 
-LL str2ll(const string &s) {
+ll str2ll(const string &s) {
     if (s.find("0x") == 0 || s.find("0X") == 0) {
         return stoll(s, NULL, 16);
     }
@@ -99,15 +97,15 @@ LL str2ll(const string &s) {
 
 void get_code();
 void get_regs();
-string get_mem(const LL addr);
+string get_mem(const ll addr);
 void print_reg(const string &name);
-UC patch_byte(const LL addr, UC c);
-bool isintext(const LL addr);
+unsigned char patch_byte(const ll addr, unsigned char c);
+bool isintext(const ll addr);
 bool chkat(const auto &x, unsigned int at, bool p);
 int chkst();
-string disone(UC *pos, LL &addr);
+string disone(unsigned char *pos, ll &addr);
 
-void bp(const LL addr);
+void bp(const ll addr);
 void cont();
 void del(int id);
 void disasm();
@@ -120,7 +118,7 @@ void list();
 void load();
 void run();
 void vmmap();
-void set(const string &reg, LL val);
+void set(const string &reg, ll val);
 void si();
 void start();
 

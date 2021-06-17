@@ -5,10 +5,8 @@
 #include <string>
 #include <vector>
 #include <map>
-#include <stdio.h>
 #include <string.h>
 #include <unistd.h>
-#include <stdint.h>
 #include <inttypes.h>
 #include <sys/wait.h>
 #include <sys/user.h>
@@ -16,24 +14,23 @@
 #include <sys/ptrace.h>
 #include <capstone/capstone.h>
 #include "sdb.h"
-
 using namespace std;
 
 int state = NOLOAD;
 program prog;
 string flags;
 pid_t pid = 0;
-LL disaddr = -1;
-LL dumpaddr = -1;
-LL bpaddr = -1;
-LL textbase = 0;
+ll disaddr = -1;
+ll dumpaddr = -1;
+ll bpaddr = -1;
+ll textbase = 0;
 char *code = NULL;
 int bpid = 0;
 int dislen = 10;
 int hitbp = -1;
 struct user_regs_struct regs_struct = {0};
-map<string, LL*> regs;
-VS reglist = {"rax", "rbx", "rcx", "rdx",
+map<string, ll*> regs;
+vector<string> reglist = {"rax", "rbx", "rcx", "rdx",
     "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15",
     "rdi", "rsi", "rbp", "rsp", "rip", "flags"};
 vector<breakpoint> bpoints;
@@ -63,7 +60,7 @@ void get_code() {
     f.close();
 }
 
-string get_mem(const LL addr) {
+string get_mem(const ll addr) {
     string s = "";
     for (int i = 0; i < MAXASM / 8; i++) {
         auto out = ptrace(PTRACE_PEEKTEXT, pid, addr, NULL);
@@ -74,30 +71,30 @@ string get_mem(const LL addr) {
 
 void get_regs() {
     ptrace(PTRACE_GETREGS, pid, NULL, &regs_struct);
-    regs["rax"] = (LL*) &regs_struct.rax;
-    regs["rbx"] = (LL*) &regs_struct.rbx;
-    regs["rcx"] = (LL*) &regs_struct.rcx;
-    regs["rdx"] = (LL*) &regs_struct.rdx;
-    regs["rsp"] = (LL*) &regs_struct.rsp;
-    regs["rbp"] = (LL*) &regs_struct.rbp;
-    regs["rsi"] = (LL*) &regs_struct.rsi;
-    regs["rdi"] = (LL*) &regs_struct.rdi;
-    regs["rip"] = (LL*) &regs_struct.rip;
-    regs["r8"] = (LL*) &regs_struct.r8;
-    regs["r9"] = (LL*) &regs_struct.r9;
-    regs["r10"] = (LL*) &regs_struct.r10;
-    regs["r11"] = (LL*) &regs_struct.r11;
-    regs["r12"] = (LL*) &regs_struct.r12;
-    regs["r13"] = (LL*) &regs_struct.r13;
-    regs["r14"] = (LL*) &regs_struct.r14;
-    regs["r15"] = (LL*) &regs_struct.r15;
-    regs["flags"] = (LL*) &regs_struct.eflags;
+    regs["rax"] = (ll*) &regs_struct.rax;
+    regs["rbx"] = (ll*) &regs_struct.rbx;
+    regs["rcx"] = (ll*) &regs_struct.rcx;
+    regs["rdx"] = (ll*) &regs_struct.rdx;
+    regs["rsp"] = (ll*) &regs_struct.rsp;
+    regs["rbp"] = (ll*) &regs_struct.rbp;
+    regs["rsi"] = (ll*) &regs_struct.rsi;
+    regs["rdi"] = (ll*) &regs_struct.rdi;
+    regs["rip"] = (ll*) &regs_struct.rip;
+    regs["r8"] = (ll*) &regs_struct.r8;
+    regs["r9"] = (ll*) &regs_struct.r9;
+    regs["r10"] = (ll*) &regs_struct.r10;
+    regs["r11"] = (ll*) &regs_struct.r11;
+    regs["r12"] = (ll*) &regs_struct.r12;
+    regs["r13"] = (ll*) &regs_struct.r13;
+    regs["r14"] = (ll*) &regs_struct.r14;
+    regs["r15"] = (ll*) &regs_struct.r15;
+    regs["flags"] = (ll*) &regs_struct.eflags;
 }
 
 void print_reg(const string &name) {
     for (auto &x : reglist) {
         if (x == name) {
-            LL val = *regs[name];
+            ll val = *regs[name];
             cerr << name << " = " << val
                 << " (" << hex << "0x" << val << dec << ")" << endl;
             return;
@@ -106,7 +103,7 @@ void print_reg(const string &name) {
     cerr << "** '" << name << "' does not exist." << endl;
 }
 
-string disone(UC *pos, LL &addr) {
+string disone(unsigned char *pos, ll &addr) {
     csh handle;
     cs_insn *insn;
     size_t count;
@@ -133,13 +130,13 @@ string disone(UC *pos, LL &addr) {
     return out;
 }
 
-UC patch_byte(const LL addr, UC c) {
+unsigned char patch_byte(const ll addr, unsigned char c) {
     auto code = ptrace(PTRACE_PEEKTEXT, pid, addr, NULL);
     ptrace(PTRACE_POKETEXT, pid, addr, (code & 0xffffffffffffff00) | (c & 0xff));
     return code & 0xff;
 }
 
-bool isintext(const LL addr) {
+bool isintext(const ll addr) {
     return prog.addr <= addr && addr <= (prog.addr + prog.size);
 }
 
@@ -164,13 +161,13 @@ int chkst() {
         get_regs();
         // hit the breakpoint or not
         for (auto &x : bpoints) {
-            LL tmpaddr = x.addr;
+            ll tmpaddr = x.addr;
             if (tmpaddr == (*regs["rip"]) - 1) {
                 hitbp = x.id;
                 bpaddr = tmpaddr;
                 // show breakpoint message
                 dislen = 1;
-                LL addrbak = disaddr;
+                ll addrbak = disaddr;
                 cerr << "** breakpoint @ ";
                 disaddr = tmpaddr;
                 disasm();
@@ -225,13 +222,17 @@ void quit() {
 }
 
 void load() {
-	stringstream s1(exec("readelf -S ./tests/hello64 | grep -A1 .text | sed -n 1p | awk '{ print $5 }'"));
+	if (state != NOLOAD) {
+        cerr << "** state must be NOT LOADED." << endl;
+        return;
+    }
+	stringstream s1(exec(("readelf -S " + prog.path + " | grep -A1 .text | sed -n 1p | awk '{ print $5 }'").c_str()));
 	s1 >> hex >> prog.addr;
-	stringstream s2(exec("readelf -S ./tests/hello64 | grep -A1 .text | sed -n 1p | awk '{ print $6 }'"));
+	stringstream s2(exec(("readelf -S " + prog.path + " | grep -A1 .text | sed -n 1p | awk '{ print $6 }'").c_str()));
 	s2 >> hex >> prog.offset;
-	stringstream s3(exec("readelf -S ./tests/hello64 | grep -A1 .text | sed -n 2p | awk '{ print $1 }'"));
+	stringstream s3(exec(("readelf -S " + prog.path + " | grep -A1 .text | sed -n 2p | awk '{ print $1 }'").c_str()));
 	s3 >> hex >> prog.size;
-	stringstream s4(exec("readelf -S ./tests/hello64 | grep -A1 .text | sed -n 2p | awk '{ print $3 }'"));
+	stringstream s4(exec(("readelf -S " + prog.path + " | grep -A1 .text | sed -n 2p | awk '{ print $3 }'").c_str()));
 	s4 >> flags;
 
 	cerr << "** program '" << prog.path << "' loaded. " << hex
@@ -253,8 +254,8 @@ void vmmap() {
         ifstream f("/proc/" + to_string(pid) + "/maps");
         string s;
         while (getline(f, s)) {
-            VS item = split(s);
-            VS addr = split(item[0], '-');
+            vector<string> item = split(s);
+            vector<string> addr = split(item[0], '-');
             cerr << setfill('0') << setw(16) << addr[0] << "-"
                 << setfill('0') << setw(16) << addr[1] << " "
                 << item[1].substr(0, 3) << " "
@@ -288,7 +289,7 @@ void start() {
         if (ptrace(PTRACE_TRACEME, 0, NULL, NULL) < 0) {
             cerr << "** ptrace error." << endl;
         }
-        char **argv = {NULL};
+        char **argv = { NULL };
         execvp(prog.path.c_str(), argv);
     }
     else {                  // parent process
@@ -296,17 +297,18 @@ void start() {
         waitpid(pid, &status, 0);
         // if parent is terminated, kill child
         ptrace(PTRACE_SETOPTIONS, pid, 0, PTRACE_O_EXITKILL);
+		cout<<"FUCK"<<endl;
         // get text base address
         ifstream f("/proc/" + to_string(pid) + "/stat");
         string s;
         getline(f, s);
-        VS out = split(s);
+        vector<string> out = split(s);
         textbase = str2ll(out[25]);
         // set breakpoints
         for (auto &x : bpoints) {
             if (!x.isfix) {
-                LL tmpaddr = x.addr;
-                UC tmp = patch_byte(tmpaddr, 0xcc);
+                ll tmpaddr = x.addr;
+                unsigned char tmp = patch_byte(tmpaddr, 0xcc);
                 x.ori = tmp;
             }
         }
@@ -352,7 +354,7 @@ void si() {
     if (chkst() == 0 && hitbp != -1) {
         for (auto &x : bpoints) {
             if (x.id == hitbp) {
-                UC tmp = patch_byte(bpaddr, 0xcc);
+                unsigned char tmp = patch_byte(bpaddr, 0xcc);
                 x.ori = tmp;
                 hitbp = -1;
                 break;
@@ -381,7 +383,7 @@ void getregs() {
     }
 }
 
-void set(const string &reg, LL val) {
+void set(const string &reg, ll val) {
     if (state != RUNNING) {
         cerr << "** state must be RUNNING." << endl;
         return;
@@ -399,7 +401,7 @@ void list() {
     }
 }
 
-void bp(const LL addr) {
+void bp(const ll addr) {
     if (state == LOADED) {
         if (!isintext(addr)) {
             cerr << "** address must be in the text segment. (LOADED state)" << endl;
@@ -408,7 +410,7 @@ void bp(const LL addr) {
         bpoints.PB({bpid++, addr, 0, false});
     }
     else if (state == RUNNING) {
-        UC tmp = patch_byte(addr, 0xcc);
+        unsigned char tmp = patch_byte(addr, 0xcc);
         bpoints.PB({bpid++, addr, tmp, true});
     }
     else {
@@ -442,8 +444,8 @@ void disasm() {
     if (code == NULL) get_code();
     if (state == LOADED) {
         for (int i = 0; i < dislen; i++) {
-            auto pos = (UC*) code + prog.offset + (disaddr - prog.addr);
-            LL tmpaddr = disaddr;
+            auto pos = (unsigned char*) code + prog.offset + (disaddr - prog.addr);
+            ll tmpaddr = disaddr;
             string out = disone(pos, tmpaddr);
             if (out == "" || tmpaddr > prog.addr + prog.size) break;
             else {
@@ -456,15 +458,15 @@ void disasm() {
     if (state == RUNNING) {
         for (int i = 0; i < dislen; i++) {
             if (isintext(disaddr)) {
-                LL offset;
+                ll offset;
                 offset = prog.offset + (disaddr - prog.addr);
-                auto pos = (UC*) code + offset;
+                auto pos = (unsigned char*) code + offset;
                 string out = disone(pos, disaddr);
                 cerr << out;
             }
             else {
                 string s = get_mem(disaddr);
-                auto pos = (UC*) s.c_str();
+                auto pos = (unsigned char*) s.c_str();
                 string out = disone(pos, disaddr);
                 cerr << out;
             }
@@ -491,7 +493,7 @@ void dump(int sz) {
             dumpaddr += 8;
         }
         cerr << hex << setfill(' ') << setw(12) << dumpaddr - 16 << ": "
-            << left << setfill(' ') << setw(49) << get_bytes((UC*) hexout.c_str(), 16)
+            << left << setfill(' ') << setw(49) << get_bytes((unsigned char*) hexout.c_str(), 16)
             << right << get_printable(hexout) << endl << dec;
     }
 }
@@ -505,7 +507,7 @@ int main(int argc, char *argv[]) {
         cerr << "sdb> ";
         string s;
         getline(cin, s);
-        VS line = split(s);
+        vector<string> line = split(s);
         if (line.empty()) continue;
         string cmd = line[0];
         if (cmd == "break" || cmd == "b") {
