@@ -13,7 +13,7 @@
 #include <sys/types.h>
 #include <sys/ptrace.h>
 #include <capstone/capstone.h>
-#include "sdb.h"
+#include "hw4.h"
 using namespace std;
 
 state st = ANY;
@@ -129,7 +129,7 @@ string dasm(unsigned char *pos, ll &addr) {
     return out;
 }
 
-unsigned char patch_byte(const ll addr, unsigned char c) {
+unsigned char cbyte(const ll addr, unsigned char c) {
     auto code = ptrace(PTRACE_PEEKTEXT, pid, addr, NULL);
     ptrace(PTRACE_POKETEXT, pid, addr, (code & 0xffffffffffffff00) | (c & 0xff));
     return code & 0xff;
@@ -169,7 +169,7 @@ int check() {
                 disaddr = addrbak;
                 dislen = 10;
 
-                patch_byte(tmpaddr, x.ori);
+                cbyte(tmpaddr, x.ori);
                 (*reg("rip"))--;
                 ptrace(PTRACE_SETREGS, pid, NULL, &regs);
                 return 1;
@@ -198,7 +198,7 @@ void bp(const ll addr) {
         bps.push_back({bi++, addr, 0, false});
     }
     else if (st == RUNNING) {
-        unsigned char tmp = patch_byte(addr, 0xcc);
+        unsigned char tmp = cbyte(addr, 0xcc);
         bps.push_back({bi++, addr, tmp, true});
     }
     else {
@@ -220,7 +220,7 @@ void del(int id) {
     bool good = false;
     for (auto itr = bps.begin(); itr != bps.end(); itr++) {
         if (id == (*itr).id) {
-            patch_byte((*itr).addr, (*itr).ori);
+            cbyte((*itr).addr, (*itr).ori);
             bps.erase(itr);
             good = true;
             break;
@@ -432,7 +432,7 @@ void si() {
     if (check() == 0 && isbp != -1) {
         for (auto &x : bps) {
             if (x.id == isbp) {
-                unsigned char tmp = patch_byte(bpaddr, 0xcc);
+                unsigned char tmp = cbyte(bpaddr, 0xcc);
                 x.ori = tmp;
                 isbp = -1;
                 break;
@@ -473,7 +473,7 @@ void start() {
         for (auto &x : bps) {
             if (!x.isfix) {
                 ll tmpaddr = x.addr;
-                unsigned char tmp = patch_byte(tmpaddr, 0xcc);
+                unsigned char tmp = cbyte(tmpaddr, 0xcc);
                 x.ori = tmp;
             }
         }

@@ -1,5 +1,5 @@
-#ifndef __SDB_H__
-#define __SDB_H__
+#ifndef __HW4_H__
+#define __HW4_H__
 
 #include <vector>
 #include <string>
@@ -106,7 +106,7 @@ void pt_code();
 void pt_regs();
 string pt_mem(const ll addr);
 void print_reg(const string &name);
-unsigned char patch_byte(const ll addr, unsigned char c);
+unsigned char cbyte(const ll addr, unsigned char c);
 bool isintext(const ll addr);
 bool vargs(vector<string> &x, unsigned int at, bool p);
 int check();
