@@ -3,7 +3,7 @@
 CPP = g++
 CPPFLAGS = -g -Wall -std=c++17
 LIBS = -lcapstone
-PROGNAME = sdb
+PROGNAME = hw4
 ZIPNAME = 0713407_hw4
 
 all: $(PROGNAME)
