@@ -18,7 +18,6 @@ using namespace std;
 
 state st = ANY;
 program prog;
-string flags;
 
 pid_t pid = 0;
 char *code = NULL;
@@ -163,7 +162,7 @@ int check() {
 				
                 dislen = 1;
                 ll addrbak = disaddr;
-                cerr << "** breakpoint @ ";
+                cerr << "** breakpoint set: ";
                 disaddr = tmpaddr;
                 disasm();
                 disaddr = addrbak;
@@ -354,14 +353,16 @@ void load() {
         cerr << "** state must be ANY." << endl;
         return;
     }
+    if (access(prog.path.c_str(), F_OK | X_OK) != 0) {
+        cerr << "** failed to open '" << prog.path << "'" << endl;
+        return;
+    }
 	stringstream s1(exec(("readelf -S " + prog.path + " | grep -A1 .text | sed -n 1p | awk '{ print $5 }'").c_str()));
 	s1 >> hex >> prog.addr;
 	stringstream s2(exec(("readelf -S " + prog.path + " | grep -A1 .text | sed -n 1p | awk '{ print $6 }'").c_str()));
 	s2 >> hex >> prog.offset;
 	stringstream s3(exec(("readelf -S " + prog.path + " | grep -A1 .text | sed -n 2p | awk '{ print $1 }'").c_str()));
 	s3 >> hex >> prog.size;
-	stringstream s4(exec(("readelf -S " + prog.path + " | grep -A1 .text | sed -n 2p | awk '{ print $3 }'").c_str()));
-	s4 >> flags;
 
 	cerr << "** program '" << prog.path << "' loaded. " << hex
 		<< ", vaddr 0x" << prog.addr
@@ -388,7 +389,7 @@ void vmmap() {
     if (st == LOADED) {
         cerr << hex << setfill('0') << setw(16) << prog.addr << "-"
             << setfill('0') << setw(16) << prog.addr + prog.size << " "
-            << flags << " "
+            << "r-x" << " "
             << setfill('0') << setw(8) << prog.offset << " "
             << prog.path << endl << dec;
     }
@@ -482,74 +483,96 @@ void start() {
     }
 }
 
-int main(int argc, char *argv[]) {
-    if (argc > 1) {
-        prog.path = argv[1];
+int command(vector<string> line) {
+    if (line.empty()) return 0;
+    string cmd = line[0];
+    if (cmd == "break" || cmd == "b") {
+        if (vargs(line, 1, true)) bp(str2ll(line[1]));
+    }
+    else if (cmd == "cont" || cmd == "c") {
+        cont();
+    }
+    else if (cmd == "delete") {
+        if (vargs(line, 1, true)) del(stoi(line[1]));
+    }
+    else if (cmd == "disasm" || cmd == "d") {
+        if (vargs(line, 1, false)) disaddr = str2ll(line[1]);
+        disasm();
+    }
+    else if (cmd == "dump" || cmd == "x") {
+        if (vargs(line, 1, false)) dumpaddr = str2ll(line[1]);
+        if (vargs(line, 2, false)) dump(str2ll(line[2]));
+        else dump();
+    }
+    else if (cmd == "exit" || cmd == "q") {
+        exit();
+        return 1;
+    }
+    else if (cmd == "get" || cmd == "g") {
+        if (vargs(line, 1, true)) getreg(line[1]);
+    }
+    else if (cmd == "getregs") {
+        getregs();
+    }
+    else if (cmd == "help" || cmd == "h") {
+        help();
+    }
+    else if (cmd == "list" || cmd == "l") {
+        list();
+    }
+    else if (cmd == "load") {
+        if (vargs(line, 1, true)) prog.path = line[1];
         load();
     }
-    while (true) {
-        cerr << "sdb> ";
-        string s;
-        getline(cin, s);
-        vector<string> line = split(s);
-        if (line.empty()) continue;
-        string cmd = line[0];
-        if (cmd == "break" || cmd == "b") {
-            if (vargs(line, 1, true)) bp(str2ll(line[1]));
-        }
-        else if (cmd == "cont" || cmd == "c") {
-            cont();
-        }
-        else if (cmd == "delete") {
-            if (vargs(line, 1, true)) del(stoi(line[1]));
-        }
-        else if (cmd == "disasm" || cmd == "d") {
-            if (vargs(line, 1, false)) disaddr = str2ll(line[1]);
-            disasm();
-        }
-        else if (cmd == "dump" || cmd == "x") {
-            if (vargs(line, 1, false)) dumpaddr = str2ll(line[1]);
-            if (vargs(line, 2, false)) dump(str2ll(line[2]));
-            else dump();
-        }
-        else if (cmd == "exit" || cmd == "q") {
-            exit();
-            break;
-        }
-        else if (cmd == "get" || cmd == "g") {
-            if (vargs(line, 1, true)) getreg(line[1]);
-        }
-        else if (cmd == "getregs") {
-            getregs();
-        }
-        else if (cmd == "help" || cmd == "h") {
-            help();
-        }
-        else if (cmd == "list" || cmd == "l") {
-            list();
-        }
-        else if (cmd == "load") {
-            if (vargs(line, 1, true)) prog.path = line[1];
+    else if (cmd == "run" || cmd == "r") {
+        run();
+    }
+    else if (cmd == "vmmap" || cmd == "m") {
+        vmmap();
+    }
+    else if (cmd == "set" || cmd == "s") {
+        if (vargs(line, 2, true)) set(line[1], str2ll(line[2]));
+    }
+    else if (cmd == "si") {
+        si();
+    }
+    else if (cmd == "start") {
+        start();
+    }
+    else {
+        cerr << "Undefined command: \"" << cmd << "\".  Try \"help\"." << endl;
+    }
+    return 0;
+}
+
+int main(int argc, char *argv[]) {
+    if ((argc == 4 || argc == 3) && string(argv[1]) == "-s") {
+        if (argc == 4) {
+            prog.path = string(argv[3]);
             load();
         }
-        else if (cmd == "run" || cmd == "r") {
-            run();
+        ifstream fin(argv[2]);
+        string s;
+        while(getline(fin, s)) {
+            vector<string> line = split(s);
+            if(command(line)) break;
         }
-        else if (cmd == "vmmap" || cmd == "m") {
-            vmmap();
+    }
+    else if (argc == 2 || argc == 1) {
+        if (argc == 2) {
+            prog.path = string(argv[1]);
+            load();
         }
-        else if (cmd == "set" || cmd == "s") {
-            if (vargs(line, 2, true)) set(line[1], str2ll(line[2]));
+        while (true) {
+            cerr << "sdb> ";
+            string s;
+            getline(cin, s);
+            vector<string> line = split(s);
+            if(command(line)) break;
         }
-        else if (cmd == "si") {
-            si();
-        }
-        else if (cmd == "start") {
-            start();
-        }
-        else {
-            cerr << "Undefined command: \"" << cmd << "\".  Try \"help\"." << endl;
-        }
+    }
+    else {
+        cerr << "usage: ./hw4 [-s script] [program]" << endl;
     }
     return 0;
 }
