@@ -102,23 +102,23 @@ ll str2ll(const string &s) {
     }
 }
 
-void get_code();
-void get_regs();
-string get_mem(const ll addr);
+void pt_code();
+void pt_regs();
+string pt_mem(const ll addr);
 void print_reg(const string &name);
 unsigned char patch_byte(const ll addr, unsigned char c);
 bool isintext(const ll addr);
-bool chkat(const auto &x, unsigned int at, bool p);
-int chkst();
-string disone(unsigned char *pos, ll &addr);
+bool vargs(vector<string> &x, unsigned int at, bool p);
+int check();
+string dasm(unsigned char *pos, ll &addr);
 
 void bp(const ll addr);
 void cont();
 void del(int id);
 void disasm();
 void dump(int sz = 80);
-void quit();
-void get(const string &reg);
+void exit();
+void getreg(const string &reg);
 void getregs();
 void help();
 void list();

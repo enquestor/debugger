@@ -21,18 +21,18 @@ program prog;
 string flags;
 
 pid_t pid = 0;
+char *code = NULL;
+int bi = 0;
+int dislen = 10;
+int isbp = -1;
 
 ll disaddr = -1;
 ll dumpaddr = -1;
 ll bpaddr = -1;
-ll textbase = 0;
-char *code = NULL;
-int bi = 0;
-int dislen = 10;
-int hitbp = -1;
+
 struct user_regs_struct regs = {0};
 
-vector<breakpoint> bpoints;
+vector<breakpoint> bps;
 
 string exec(const char* cmd) {
     array<char, 128> buffer;
@@ -71,10 +71,8 @@ ll* reg(string name) {
 
 void pt_code() {
     ifstream f(prog.path.c_str(), ios::in | ios::binary | ios::ate);
-    streampos size;
-    size = f.tellg();
-    int codesz = size + 1L;
-    code = new char [codesz];
+    streampos size = f.tellg();
+    code = new char [size + 1L];
     f.seekg(0, ios::beg);
     f.read(code, size);
     code[size] = 0;
@@ -98,24 +96,22 @@ void print_reg(const string &name) {
     for (auto &x : REGS) {
         if (x == name) {
             ll val = *reg(name);
-            cerr << name << " = " << val
-                << " (" << hex << "0x" << val << dec << ")" << endl;
+            cerr << name << " = " << val << " (" << hex << "0x" << val << dec << ")" << endl;
             return;
         }
     }
     cerr << "** '" << name << "' does not exist." << endl;
 }
 
-string disone(unsigned char *pos, ll &addr) {
+string dasm(unsigned char *pos, ll &addr) {
     csh handle;
-    cs_insn *insn;
-    size_t count;
-    string out = "";
     if (cs_open(CS_ARCH_X86, CS_MODE_64, &handle) != CS_ERR_OK) {
         cerr << "** cs open error." << endl;
         return "";
     }
-    count = cs_disasm(handle, pos, MAX, addr, 0, &insn);
+    cs_insn *insn;
+    size_t count = cs_disasm(handle, pos, MAX, addr, 0, &insn);
+    string out = "";
     if (count > 0) {
         stringstream ss;
         ss << hex << setfill(' ') << setw(12) << insn[0].address << ": "
@@ -127,7 +123,7 @@ string disone(unsigned char *pos, ll &addr) {
         cs_free(insn, count);
     }
     else {
-        cerr << "** failed to disassemble given code!" << endl;
+        cerr << "** disassemble failed." << endl;
     }
     cs_close(&handle);
     return out;
@@ -143,13 +139,13 @@ bool isintext(const ll addr) {
     return prog.addr <= addr && addr <= (prog.addr + prog.size);
 }
 
-bool chkat(const auto &x, unsigned int at, bool p) {
+bool vargs(vector<string> &x, unsigned int at, bool p) {
     if (x.size() > at) return true;
     if (p) cerr << "** missing argument(s)." << endl;
     return false;
 }
 
-int chkst() {
+int check() {
     int status;
     waitpid(pid, &status, 0);
     if (WIFSTOPPED(status)) {
@@ -157,12 +153,12 @@ int chkst() {
             cerr << "** child process " << pid << " stopped by signal (code " << WSTOPSIG(status) << ")" << endl;
             return -1;
         }
-        if (hitbp != -1) return 0;
+        if (isbp != -1) return 0;
         pt_regs();
-        for (auto &x : bpoints) {
+        for (auto &x : bps) {
             ll tmpaddr = x.addr;
             if (tmpaddr == (*reg("rip") - 1)) {
-                hitbp = x.id;
+                isbp = x.id;
                 bpaddr = tmpaddr;
 				
                 dislen = 1;
@@ -193,6 +189,141 @@ int chkst() {
     return -1;
 }
 
+void bp(const ll addr) {
+    if (st == LOADED) {
+        if (!isintext(addr)) {
+            cerr << "** address must be in the text segment. (LOADED state)" << endl;
+            return;
+        }
+        bps.push_back({bi++, addr, 0, false});
+    }
+    else if (st == RUNNING) {
+        unsigned char tmp = patch_byte(addr, 0xcc);
+        bps.push_back({bi++, addr, tmp, true});
+    }
+    else {
+        cerr << "** state must be LOADED or RUNNING." << endl;
+    }
+}
+
+void cont() {
+    if (st != RUNNING) {
+        cerr << "** state must be RUNNING." << endl;
+        return;
+    }
+    if (isbp != -1) si();
+    ptrace(PTRACE_CONT, pid, NULL, NULL);
+    check();
+}
+
+void del(int id) {
+    bool good = false;
+    for (auto itr = bps.begin(); itr != bps.end(); itr++) {
+        if (id == (*itr).id) {
+            patch_byte((*itr).addr, (*itr).ori);
+            bps.erase(itr);
+            good = true;
+            break;
+        }
+    }
+    if (good) cerr << "** breakpoint " << id << " deleted." << endl;
+    else cerr << "** no breakpoint number " << id << "." << endl;
+}
+
+void disasm() {
+    if (st != LOADED && st != RUNNING) {
+        cerr << "** state must be LOADED or RUNNING." << endl;
+        return;
+    }
+    if (disaddr == -1) {
+        cerr << "** no addr is given." << endl;
+        return;
+    }
+    if (code == NULL) pt_code();
+    if (st == LOADED) {
+        for (int i = 0; i < dislen; i++) {
+            auto pos = (unsigned char*) code + prog.offset + (disaddr - prog.addr);
+            ll tmpaddr = disaddr;
+            string out = dasm(pos, tmpaddr);
+            if (out == "" || tmpaddr > prog.addr + prog.size) break;
+            else {
+                disaddr = tmpaddr;
+                cerr << out;
+            }
+        }
+        return;
+    }
+    if (st == RUNNING) {
+        for (int i = 0; i < dislen; i++) {
+            if (isintext(disaddr)) {
+                ll offset;
+                offset = prog.offset + (disaddr - prog.addr);
+                auto pos = (unsigned char*) code + offset;
+                string out = dasm(pos, disaddr);
+                cerr << out;
+            }
+            else {
+                string s = pt_mem(disaddr);
+                auto pos = (unsigned char*) s.c_str();
+                string out = dasm(pos, disaddr);
+                cerr << out;
+            }
+        }
+    }
+}
+
+void dump(int sz) {
+    if (st != RUNNING) {
+        cerr << "** state must be RUNNING." << endl;
+        return;
+    }
+    if (dumpaddr == -1) {
+        cerr << "** no addr is given." << endl;
+        return;
+    }
+    int nline = sz / 16, nbytes = sz % 16;
+    int n = nline + (nbytes != 0);
+    for (int i = 0; i < n; i++) {
+        string hexout = "";
+        for (int j = 0; j < 2; j++) {
+            auto out = ptrace(PTRACE_PEEKTEXT, pid, dumpaddr, NULL);
+            hexout += string((char*) &out, 8);
+            dumpaddr += 8;
+        }
+        cerr << hex << setfill(' ') << setw(12) << dumpaddr - 16 << ": "
+            << left << setfill(' ') << setw(49) << get_bytes((unsigned char*) hexout.c_str(), 16)
+            << right << get_printable(hexout) << endl << dec;
+    }
+}
+
+void exit() {
+    if (code) {
+        delete [] code;
+        code = NULL;
+    }
+    if (pid) kill(pid, SIGTERM);
+}
+
+void getreg(const string &reg) {
+    if (st != RUNNING) {
+        cerr << "** state must be RUNNING." << endl;
+        return;
+    }
+    pt_regs();
+    print_reg(reg);
+}
+
+void getregs() {
+    if (st != RUNNING) {
+        cerr << "** state must be RUNNING." << endl;
+        return;
+    }
+    pt_regs();
+    for (auto &x : REGS) {
+        print_reg(x);
+    }
+}
+
 void help() {
     cerr << "- break {instruction-address}: add a break point" << endl;
     cerr << "- cont: continue execution" << endl;
@@ -212,17 +343,15 @@ void help() {
     cerr << "- start: start the program and stop at the first instruction" << endl;
 }
 
-void quit() {
-    if (code) {
-        delete [] code;
-        code = NULL;
+void list() {
+    for (auto &x : bps) {
+        cerr << setfill(' ') << setw(3) << x.id << ":" << setfill(' ') << setw(8) << hex << x.addr << endl << dec;
     }
-    if (pid) kill(pid, SIGTERM);
 }
 
 void load() {
 	if (st != ANY) {
-        cerr << "** state must be NOT LOADED." << endl;
+        cerr << "** state must be ANY." << endl;
         return;
     }
 	stringstream s1(exec(("readelf -S " + prog.path + " | grep -A1 .text | sed -n 1p | awk '{ print $5 }'").c_str()));
@@ -239,6 +368,20 @@ void load() {
 		<< ", offset 0x" << prog.offset
 		<< ", size 0x" << prog.size << endl << dec;
 	st = LOADED;
+}
+
+void run() {
+    if (st == RUNNING) {
+        cerr << "** program '" << prog.path << "' is already running." << endl;
+        cont();
+    }
+    else if (st == LOADED) {
+        start();
+        cont();
+    }
+    else {
+        cerr << "** state must be LOADED or RUNNING." << endl;
+    }
 }
 
 void vmmap() {
@@ -270,6 +413,34 @@ void vmmap() {
     }
 }
 
+void set(const string &name, ll val) {
+    if (st != RUNNING) {
+        cerr << "** state must be RUNNING." << endl;
+        return;
+    }
+    pt_regs();
+    *reg(name) = val;
+    ptrace(PTRACE_SETREGS, pid, NULL, &regs);
+}
+
+void si() {
+    if (st != RUNNING) {
+        cerr << "** state must be RUNNING." << endl;
+        return;
+    }
+    ptrace(PTRACE_SINGLESTEP, pid, NULL, NULL);
+    if (check() == 0 && isbp != -1) {
+        for (auto &x : bps) {
+            if (x.id == isbp) {
+                unsigned char tmp = patch_byte(bpaddr, 0xcc);
+                x.ori = tmp;
+                isbp = -1;
+                break;
+            }
+        }
+    }
+}
+
 void start() {
     if (st != LOADED) {
         cerr << "** state must be LOADED." << endl;
@@ -284,26 +455,22 @@ void start() {
         cerr << "** fork error." << endl;
         return;
     }
-    else if (pid == 0) {    // child process
+    else if (pid == 0) {
         if (ptrace(PTRACE_TRACEME, 0, NULL, NULL) < 0) {
             cerr << "** ptrace error." << endl;
         }
         char **argv = { NULL };
         execvp(prog.path.c_str(), argv);
     }
-    else {                  // parent process
+    else {
         int status;
         waitpid(pid, &status, 0);
-        // if parent is terminated, kill child
         ptrace(PTRACE_SETOPTIONS, pid, 0, PTRACE_O_EXITKILL);
-        // get text base address
         ifstream f("/proc/" + to_string(pid) + "/stat");
         string s;
         getline(f, s);
         vector<string> out = split(s);
-        textbase = str2ll(out[25]);
-        // set breakpoints
-        for (auto &x : bpoints) {
+        for (auto &x : bps) {
             if (!x.isfix) {
                 ll tmpaddr = x.addr;
                 unsigned char tmp = patch_byte(tmpaddr, 0xcc);
@@ -312,187 +479,6 @@ void start() {
         }
         cerr << "** pid " << pid << endl;
         st = RUNNING;
-    }
-}
-
-void cont() {
-    if (st != RUNNING) {
-        cerr << "** state must be RUNNING." << endl;
-        return;
-    }
-    // restore the breakpoint
-    if (hitbp != -1) {
-        si();
-    }
-    ptrace(PTRACE_CONT, pid, NULL, NULL);
-    chkst();
-}
-
-void run() {
-    if (st == RUNNING) {
-        cerr << "** program '" << prog.path << "' is already running." << endl;
-        cont();
-    }
-    else if (st == LOADED) {
-        start();
-        cont();
-    }
-    else {
-        cerr << "** state must be LOADED or RUNNING." << endl;
-    }
-}
-
-void si() {
-    if (st != RUNNING) {
-        cerr << "** state must be RUNNING." << endl;
-        return;
-    }
-    ptrace(PTRACE_SINGLESTEP, pid, NULL, NULL);
-    // restore the breakpoint
-    if (chkst() == 0 && hitbp != -1) {
-        for (auto &x : bpoints) {
-            if (x.id == hitbp) {
-                unsigned char tmp = patch_byte(bpaddr, 0xcc);
-                x.ori = tmp;
-                hitbp = -1;
-                break;
-            }
-        }
-    }
-}
-
-void get(const string &reg) {
-    if (st != RUNNING) {
-        cerr << "** state must be RUNNING." << endl;
-        return;
-    }
-    pt_regs();
-    print_reg(reg);
-}
-
-void getregs() {
-    if (st != RUNNING) {
-        cerr << "** state must be RUNNING." << endl;
-        return;
-    }
-    pt_regs();
-    for (auto &x : REGS) {
-        print_reg(x);
-    }
-}
-
-void set(const string &name, ll val) {
-    if (st != RUNNING) {
-        cerr << "** state must be RUNNING." << endl;
-        return;
-    }
-    pt_regs();
-    *reg(name) = val;
-    ptrace(PTRACE_SETREGS, pid, NULL, &regs);
-}
-
-void list() {
-    for (auto &x : bpoints) {
-        cerr << setfill(' ') << setw(3) << x.id << ":"
-            << setfill(' ') << setw(8) << hex << x.addr
-            << endl << dec;
-    }
-}
-
-void bp(const ll addr) {
-    if (st == LOADED) {
-        if (!isintext(addr)) {
-            cerr << "** address must be in the text segment. (LOADED state)" << endl;
-            return;
-        }
-        bpoints.push_back({bi++, addr, 0, false});
-    }
-    else if (st == RUNNING) {
-        unsigned char tmp = patch_byte(addr, 0xcc);
-        bpoints.push_back({bi++, addr, tmp, true});
-    }
-    else {
-        cerr << "** state must be LOADED or RUNNING." << endl;
-    }
-}
-
-void del(int id) {
-    bool chk = false;
-    for (auto itr = bpoints.begin(); itr != bpoints.end(); itr++) {
-        if (id == (*itr).id) {
-            patch_byte((*itr).addr, (*itr).ori);
-            bpoints.erase(itr);
-            chk = true;
-            break;
-        }
-    }
-    if (chk) cerr << "** breakpoint " << id << " deleted." << endl;
-    else cerr << "** no breakpoint number " << id << "." << endl;
-}
-
-void disasm() {
-    if (st != LOADED && st != RUNNING) {
-        cerr << "** state must be LOADED or RUNNING." << endl;
-        return;
-    }
-    if (disaddr == -1) {
-        cerr << "** no addr is given." << endl;
-        return;
-    }
-    if (code == NULL) pt_code();
-    if (st == LOADED) {
-        for (int i = 0; i < dislen; i++) {
-            auto pos = (unsigned char*) code + prog.offset + (disaddr - prog.addr);
-            ll tmpaddr = disaddr;
-            string out = disone(pos, tmpaddr);
-            if (out == "" || tmpaddr > prog.addr + prog.size) break;
-            else {
-                disaddr = tmpaddr;
-                cerr << out;
-            }
-        }
-        return;
-    }
-    if (st == RUNNING) {
-        for (int i = 0; i < dislen; i++) {
-            if (isintext(disaddr)) {
-                ll offset;
-                offset = prog.offset + (disaddr - prog.addr);
-                auto pos = (unsigned char*) code + offset;
-                string out = disone(pos, disaddr);
-                cerr << out;
-            }
-            else {
-                string s = pt_mem(disaddr);
-                auto pos = (unsigned char*) s.c_str();
-                string out = disone(pos, disaddr);
-                cerr << out;
-            }
-        }
-    }
-}
-
-void dump(int sz) {
-    if (st != RUNNING) {
-        cerr << "** state must be RUNNING." << endl;
-        return;
-    }
-    if (dumpaddr == -1) {
-        cerr << "** no addr is given." << endl;
-        return;
-    }
-    int nline = sz / 16, nbytes = sz % 16;
-    int n = nline + (nbytes != 0);
-    for (int i = 0; i < n; i++) {
-        string hexout = "";
-        for (int j = 0; j < 2; j++) {
-            auto out = ptrace(PTRACE_PEEKTEXT, pid, dumpaddr, NULL);
-            hexout += string((char*) &out, 8);
-            dumpaddr += 8;
-        }
-        cerr << hex << setfill(' ') << setw(12) << dumpaddr - 16 << ": "
-            << left << setfill(' ') << setw(49) << get_bytes((unsigned char*) hexout.c_str(), 16)
-            << right << get_printable(hexout) << endl << dec;
     }
 }
 
@@ -509,29 +495,29 @@ int main(int argc, char *argv[]) {
         if (line.empty()) continue;
         string cmd = line[0];
         if (cmd == "break" || cmd == "b") {
-            if (chkat(line, 1, true)) bp(str2ll(line[1]));
+            if (vargs(line, 1, true)) bp(str2ll(line[1]));
         }
         else if (cmd == "cont" || cmd == "c") {
             cont();
         }
         else if (cmd == "delete") {
-            if (chkat(line, 1, true)) del(stoi(line[1]));
+            if (vargs(line, 1, true)) del(stoi(line[1]));
         }
         else if (cmd == "disasm" || cmd == "d") {
-            if (chkat(line, 1, false)) disaddr = str2ll(line[1]);
+            if (vargs(line, 1, false)) disaddr = str2ll(line[1]);
             disasm();
         }
         else if (cmd == "dump" || cmd == "x") {
-            if (chkat(line, 1, false)) dumpaddr = str2ll(line[1]);
-            if (chkat(line, 2, false)) dump(str2ll(line[2]));
+            if (vargs(line, 1, false)) dumpaddr = str2ll(line[1]);
+            if (vargs(line, 2, false)) dump(str2ll(line[2]));
             else dump();
         }
         else if (cmd == "exit" || cmd == "q") {
-            quit();
+            exit();
             break;
         }
         else if (cmd == "get" || cmd == "g") {
-            if (chkat(line, 1, true)) get(line[1]);
+            if (vargs(line, 1, true)) getreg(line[1]);
         }
         else if (cmd == "getregs") {
             getregs();
@@ -543,7 +529,7 @@ int main(int argc, char *argv[]) {
             list();
         }
         else if (cmd == "load") {
-            if (chkat(line, 1, true)) prog.path = line[1];
+            if (vargs(line, 1, true)) prog.path = line[1];
             load();
         }
         else if (cmd == "run" || cmd == "r") {
@@ -553,7 +539,7 @@ int main(int argc, char *argv[]) {
             vmmap();
         }
         else if (cmd == "set" || cmd == "s") {
-            if (chkat(line, 2, true)) set(line[1], str2ll(line[2]));
+            if (vargs(line, 2, true)) set(line[1], str2ll(line[2]));
         }
         else if (cmd == "si") {
             si();
