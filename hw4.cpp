@@ -162,7 +162,7 @@ int check() {
 				
                 dislen = 1;
                 ll addrbak = disaddr;
-                cerr << "** breakpoint set: ";
+                cerr << "** breakpoint @ ";
                 disaddr = tmpaddr;
                 disasm();
                 disaddr = addrbak;
