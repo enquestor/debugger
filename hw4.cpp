@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <iostream>
 #include <iomanip>
 #include <fstream>
@@ -89,17 +90,6 @@ string pt_mem(const ll addr) {
 
 void pt_regs() {
     ptrace(PTRACE_GETREGS, pid, NULL, &regs);
-}
-
-void print_reg(const string &name) {
-    for (auto &x : REGS) {
-        if (x == name) {
-            ll val = *reg(name);
-            cerr << name << " = " << val << " (" << hex << "0x" << val << dec << ")" << endl;
-            return;
-        }
-    }
-    cerr << "** '" << name << "' does not exist." << endl;
 }
 
 string dasm(unsigned char *pos, ll &addr) {
@@ -303,13 +293,18 @@ void exit() {
     if (pid) kill(pid, SIGTERM);
 }
 
-void getreg(const string &reg) {
+void getreg(const string &name) {
     if (st != RUNNING) {
         cerr << "** state must be RUNNING." << endl;
         return;
     }
     pt_regs();
-    print_reg(reg);
+    if (find(REGS.begin(), REGS.end(), name) == REGS.end()) {
+        cerr << "** '" << name << "' does not exist." << endl;
+        return;
+    }
+    ll val = *reg(name);
+    cerr << name << " = " << val << " (" << hex << "0x" << val << dec << ")" << endl;
 }
 
 void getregs() {
@@ -318,8 +313,20 @@ void getregs() {
         return;
     }
     pt_regs();
+	int c = 0;
     for (auto &x : REGS) {
-        print_reg(x);
+        string s = x;
+        for (auto & c: s) c = toupper(c);
+        ll val = *reg(x);
+        if(x == "flags") {
+            cerr << s << " " << hex << setfill('0') << setw(16) << val << endl;
+        }
+        else {
+            cerr << s << " " << hex << val << "\t\t";
+        }
+		if(++c % 4 == 0) {
+			cerr << endl;
+		}
     }
 }
 
@@ -402,7 +409,7 @@ void vmmap() {
             cerr << setfill('0') << setw(16) << addr[0] << "-"
                 << setfill('0') << setw(16) << addr[1] << " "
                 << item[1].substr(0, 3) << " "
-                << item[2];
+                << item[4];
             if (item.size() > 5) cerr << " " << item[5];
             cerr << endl;
         }
@@ -557,6 +564,7 @@ int main(int argc, char *argv[]) {
             vector<string> line = split(s);
             if(command(line)) break;
         }
+		cerr << "Bye." << endl;
     }
     else if (argc == 2 || argc == 1) {
         if (argc == 2) {
